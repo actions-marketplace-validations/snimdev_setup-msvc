@@ -1,0 +1,40 @@
+name: Set up MSVC
+description: Exports the vcvarsall environment of the latest Visual Studio or Build Tools, without Node.js.
+author: snimdev
+branding:
+  icon: terminal
+  color: blue
+inputs:
+  arch:
+    description: Target architecture passed to vcvarsall.bat
+    default: x64
+runs:
+  using: composite
+  steps:
+    - name: Run vcvarsall
+      shell: pwsh
+      env:
+        ARCH: ${{ inputs.arch }}
+      run: |
+        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        # -products * also matches Build Tools, which a plain query skips.
+        $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        if (-not $vs) { throw 'vswhere found no Visual Studio with the x64 C++ tools' }
+        $bat = "$vs\VC\Auxiliary\Build\vcvarsall.bat"
+        $vars = cmd /d /s /c "`"$bat`" $env:ARCH >nul && set"
+        if ($LASTEXITCODE -ne 0 -or -not ($vars -match '^VCToolsInstallDir=')) { throw "vcvarsall.bat $env:ARCH failed" }
+        foreach ($line in $vars) {
+          $name, $value = $line -split '=', 2
+          if (-not $name -or $value -ceq [Environment]::GetEnvironmentVariable($name)) { continue }
+          if ($name -eq 'PATH') {
+            # vcvars prepends to PATH; GITHUB_PATH puts the last line first, so write in reverse.
+            $old = $env:PATH
+            $added = if ($value.EndsWith($old)) { $value.Substring(0, $value.Length - $old.Length) } else { $value }
+            $paths = @($added -split ';' | Where-Object { $_ } | Select-Object -Unique)
+            [array]::Reverse($paths)
+            $paths >> $env:GITHUB_PATH
+          } else {
+            if ($name -in 'INCLUDE', 'LIB', 'LIBPATH') { $value = ($value -split ';' | Select-Object -Unique) -join ';' }
+            "$name=$value" >> $env:GITHUB_ENV
+          }
+        }

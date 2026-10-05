@@ -1,0 +1,37 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+        arch: [x64, x86]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Compile and run with cl
+        env:
+          BITS: ${{ matrix.arch == 'x64' && '8' || '4' }}
+        run: |
+          if (-not $env:VCToolsInstallDir) { throw 'VCToolsInstallDir is not set' }
+          '#include <stdio.h>
+          int main(void) { printf("%u", (unsigned)sizeof(void *)); return 0; }' | Set-Content hello.c
+          cl /nologo hello.c
+          if ($LASTEXITCODE -ne 0) { throw 'cl failed' }
+          $size = ./hello.exe
+          if ($size -ne $env:BITS) { throw "pointer size $size, expected $env:BITS" }
